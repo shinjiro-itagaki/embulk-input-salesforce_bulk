@@ -303,7 +303,7 @@ public class SalesforceBulkInputPlugin
         String from = task.getObjectType();
         return guessQuerySelectFromByConfigSourceList(from,task.getColumns().getColumns().stream().map(cc->cc.getConfigSource()).collect(Collectors.toList()));
     }
-        
+    
     public static String guessQuerySelectFromByConfigSourceList(String from, List<ConfigSource> cslist)
     {
         List<String> select_xs = new ArrayList<String>();
@@ -341,8 +341,40 @@ public class SalesforceBulkInputPlugin
     public ConfigDiff guess(ConfigSource config)
     {
         PluginTask task = config.loadConfig(PluginTask.class);
-        String querySelectFrom = task.getQuerySelectFrom().or("");
+        SalesforceBulkWrapper sfbw = null;
+        try{
+            sfbw =
+                new SalesforceBulkWrapper(task.getUserName(),
+                                          task.getPassword(),
+                                          task.getAuthEndpointUrl(),
+                                          task.getCompression(),
+                                          task.getPollingIntervalMillisecond(),
+                                          task.getQueryAll()
+                                          );
+        }catch(AsyncApiException|ConnectionException e){
+            log.error("{}", e.getClass(), e);
+            return Exec.newConfigDiff();
+        }
+        
         SchemaConfig sc = task.getColumns();
+        Field[] fs = sfbw.getFieldsOf(task.getObjectType());
+
+        // 必要な数だけcolumnを追加したあとリロード
+        if(sc == null || sc.getColumnCount() < 1){
+            config.set("columns", Arrays.stream(fs).map(x -> {
+                        Map<String,String> y = new HashMap<String,String>();
+                        y.put("name", x.getName());
+                        y.put("type", "string");
+                        return y;
+                    }).collect(Collectors.toList()).toArray()
+                );
+            // リロード
+            task = config.loadConfig(PluginTask.class);
+            sc = task.getColumns();
+        }
+        
+        String querySelectFrom = task.getQuerySelectFrom().or("");
+        
         List<ColumnConfig> cclist = (sc == null) ? new ArrayList<ColumnConfig>() : sc.getColumns();
         Map<String,ColumnConfig> ccmap = new HashMap<String,ColumnConfig>();
         java.util.Iterator<ColumnConfig> itr = cclist.iterator();
@@ -351,54 +383,35 @@ public class SalesforceBulkInputPlugin
             ccmap.put(x.getName(),x);
         }
         String[] columnNames = (cclist == null) ? new String[0] : cclist.stream().map(c->c.getName()).collect(Collectors.toList()).toArray(new String[0]);
-        
-        try{
-            SalesforceBulkWrapper sfbw =
-                new SalesforceBulkWrapper(task.getUserName(),
-                                          task.getPassword(),
-                                          task.getAuthEndpointUrl(),
-                                          task.getCompression(),
-                                          task.getPollingIntervalMillisecond(),
-                                          task.getQueryAll()
-                                          );
 
-            Field[] fs = sfbw.getFieldsOf(task.getObjectType());
-            
-            Map<String,Field> col_info_map = new HashMap<String,Field>();
-            
-            if(columnNames == null || columnNames.length < 1){
-                columnNames= Arrays.stream(fs).map(x->x.getName()).collect(Collectors.toList()).toArray(new String[0]);
-            }
+        Map<String,Field> col_info_map = new HashMap<String,Field>();
 
-            for(Field f : fs){
-                col_info_map.put(f.getName(),f);
-            }
+        // カラム定義がない場合、読み取ったスキーマ情報をすべて書き込む
+        if(columnNames == null || columnNames.length < 1){
+            columnNames= Arrays.stream(fs).map(x->x.getName()).collect(Collectors.toList()).toArray(new String[0]);
+        }
 
-            List<ConfigSource> srcs = new ArrayList<ConfigSource>();
-            for(String name : columnNames){
-                Field f = col_info_map.get(name);
+        for(Field f : fs){
+            col_info_map.put(f.getName(),f);
+        }
+
+        List<ConfigSource> srcs = new ArrayList<ConfigSource>();
+        // List<Map<String,String>> srcs = new ArrayList<Map<String,String>>();
+        for(String name : columnNames){
+            Field f = col_info_map.get(name);
+            if(f != null){
+                String typeOnSfdc = ""+f.getType();
+                String type = this.castTypeName(typeOnSfdc);
+                String label = f.getLabel();
+                String format = null;
+                //Map<String,String> src = new HashMap<String,String>();
                 ColumnConfig cc = ccmap.get(name);
                 ConfigSource src = cc.getConfigSource();
-                if(f != null){
-                    String typeOnSfdc = ""+f.getType();
-                    String type = this.castTypeName(typeOnSfdc);
-                    src.set("type",type);
                     
-                    String label = f.getLabel();
-                    if(label!=null || label.equals("")){
-                        src.set("label",label);
-                    }
-                    if(f.getLength() > 0){
-                        src.set("size", ""+f.getLength());
-                    }
-                    if(f.getPrecision() > 0){
-                        src.set("precision",""+f.getPrecision());
-                    }
-
+                if(cc != null){
                     // start guess format
                     ConfigSource option = cc.getOption();
                     if(option != null){
-                        String format = null;
                         if(option.has("format")){
                             format = option.get(String.class,"format");
                         }
@@ -407,41 +420,49 @@ public class SalesforceBulkInputPlugin
                             format = this.guessFormat(typeOnSfdc);
                         }
                         format = format == null ? "" : format;
-                        if(!format.isEmpty()){
-                            // set format
-                            src.set("format",format);
-                        }
                     }
-                    // end guess format
+                    // end guess format                        
+                }
+
+                if(!format.isEmpty()){
+                    // set format
+                    src.set("format",format);
+                }
+                    
+                src.set("type",type);
+                if(label!=null || label.equals("")){
+                    src.set("label",label);
+                }
+                if(f.getLength() > 0){
+                    src.set("size", ""+f.getLength());
+                }
+                if(f.getPrecision() > 0){
+                    src.set("precision",""+f.getPrecision());
                 }
                 srcs.add(src);
             }
+        }
             
-            if(querySelectFrom == null || querySelectFrom.trim().equals("")){
-                querySelectFrom = this.guessQuerySelectFromByConfigSourceList(task.getObjectType(),srcs);
-            }
-
-            ConfigDiff rtn = Exec.newConfigDiff();
-            if(task.getShowAllObjectTypesByGuess()){
-                List<Map<String,String>> objects = new ArrayList<Map<String,String>>();
-                DescribeGlobalSObjectResult[] sobjs = sfbw.getDescribeGlobalSObjectResults();
-                for( DescribeGlobalSObjectResult sobj : sobjs ){
-                    Map<String,String> info = new HashMap<String,String>();
-                    info.put("name" ,sobj.getName());
-                    info.put("label",sobj.getLabel());
-                    objects.add(info);
-                }
-                rtn = rtn.set("objectTypes",objects);
-            }
-            
-            return rtn
-                .set("columns", srcs)
-                .set("querySelectFrom", querySelectFrom);
-        } catch (ConnectionException|AsyncApiException e) {
-            log.error("{}", e.getClass(), e);
+        if(querySelectFrom == null || querySelectFrom.trim().equals("")){
+            querySelectFrom = this.guessQuerySelectFromByConfigSourceList(task.getObjectType(),srcs);
         }
 
-        return Exec.newConfigDiff();
+        ConfigDiff rtn = Exec.newConfigDiff();
+        if(task.getShowAllObjectTypesByGuess()){
+            List<Map<String,String>> objects = new ArrayList<Map<String,String>>();
+            DescribeGlobalSObjectResult[] sobjs = sfbw.getDescribeGlobalSObjectResults();
+            for( DescribeGlobalSObjectResult sobj : sobjs ){
+                Map<String,String> info = new HashMap<String,String>();
+                info.put("name" ,sobj.getName());
+                info.put("label",sobj.getLabel());
+                objects.add(info);
+            }
+            rtn = rtn.set("objectTypes",objects);
+        }
+            
+        return rtn
+            .set("columns", srcs)
+            .set("querySelectFrom", querySelectFrom);
     }
 
     class ColumnVisitorImpl implements ColumnVisitor {
