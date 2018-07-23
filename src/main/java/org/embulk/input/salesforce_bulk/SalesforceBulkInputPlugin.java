@@ -386,11 +386,6 @@ public class SalesforceBulkInputPlugin
 
         Map<String,Field> col_info_map = new HashMap<String,Field>();
 
-        // カラム定義がない場合、読み取ったスキーマ情報をすべて書き込む
-        if(columnNames == null || columnNames.length < 1){
-            columnNames= Arrays.stream(fs).map(x->x.getName()).collect(Collectors.toList()).toArray(new String[0]);
-        }
-
         for(Field f : fs){
             col_info_map.put(f.getName(),f);
         }
