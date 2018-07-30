@@ -394,15 +394,14 @@ public class SalesforceBulkInputPlugin
         // List<Map<String,String>> srcs = new ArrayList<Map<String,String>>();
         for(String name : columnNames){
             Field f = col_info_map.get(name);
+            ColumnConfig cc = ccmap.get(name);
+            ConfigSource src = cc.getConfigSource();
             if(f != null){
                 String typeOnSfdc = ""+f.getType();
                 String type = this.castTypeName(typeOnSfdc);
                 String label = f.getLabel();
                 String format = null;
                 //Map<String,String> src = new HashMap<String,String>();
-                ColumnConfig cc = ccmap.get(name);
-                ConfigSource src = cc.getConfigSource();
-                    
                 if(cc != null){
                     // start guess format
                     ConfigSource option = cc.getOption();
@@ -434,8 +433,8 @@ public class SalesforceBulkInputPlugin
                 if(f.getPrecision() > 0){
                     src.set("precision",""+f.getPrecision());
                 }
-                srcs.add(src);
             }
+            srcs.add(src);
         }
             
         if(querySelectFrom == null || querySelectFrom.trim().equals("")){
