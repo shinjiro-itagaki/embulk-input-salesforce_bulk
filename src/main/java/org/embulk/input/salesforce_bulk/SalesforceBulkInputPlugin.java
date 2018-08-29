@@ -119,6 +119,10 @@ public class SalesforceBulkInputPlugin
         @Config("showAllObjectTypesByGuess")
         @ConfigDefault("false")
         public Boolean getShowAllObjectTypesByGuess();
+
+        @Config("useSoapApiIfNotSupported")
+        @ConfigDefault("false")
+        public Boolean getUseSoapApiIfNotSupported();
     }
 
     private Logger log = Exec.getLogger(SalesforceBulkInputPlugin.class);
@@ -265,9 +269,17 @@ public class SalesforceBulkInputPlugin
 
             log.info("Send request : '{}'", query);
 
-            List<Map<String, String>> queryResults = sfbw.syncQuery(
-                    task.getObjectType(), query);
-
+            try{
+                List<Map<String, String>> queryResults = sfbw.syncQuery(task.getObjectType(), query);
+            }catch(AsyncApiException e){
+                if(this.getUseSoapApiIfNotSupported()){
+                    // use soap api
+                    queryResults = sfwb.queryBySoap(task.getObjectType(), query);
+                } else {
+                    throw e
+                }
+            }
+            
             for (Map<String, String> row : queryResults) {
                 // Visitor 作成
                 ColumnVisitor visitor = new ColumnVisitorImpl(row, task, pageBuilder);

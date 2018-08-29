@@ -142,6 +142,23 @@ public class SalesforceBulkWrapper implements AutoCloseable {
         }
     }
 
+    public List<Map<String, String>> queryBySoap(String objectType, String query)
+            throws InterruptedException, AsyncApiException, IOException {
+        QueryResult results = connection.query(query);
+        List<Map<String,String>> rtn = new ArrayList<>();
+        if (results.getSize() > 0) {
+            for (SObject so: results.getRecords()) {
+                Map<String, Object> fieldsToValue = so.getPopulatedFieldsAsMap();
+                Map<String, String> rec = new HashMap<String,String>();
+                for (String fieldName : fieldsToValue.keySet()){
+                    rec.set(fieldName,fieldsToValue.get(fieldName));
+                }
+                rtn.add(rec)
+            }
+        }
+        return rtn;
+    }
+    
     private List<Map<String, String>> getQueryResultMapList(BatchInfo batchInfo,
             QueryResultList queryResultList)
             throws AsyncApiException, IOException {
