@@ -24,6 +24,7 @@ Salesforce Bulk API の一括クエリ結果を取得します。
 - **start_row_marker**: 抽出条件に、『カラム「startRowMarkerName」がこの値よりも大きい』を追加する.(string, default is null)
 - **queryAll**: if true, uses the queryAll operation so that deleted records are returned.(boolean, default is false)
 - **showAllObjectTypesByGuess**: if true, add all names and labels of objectTypes to 'objectTypes'. (boolean, default is false)
+- **useSoapApiIfNotSupported**: if true, use SOAP API if bulk API is not supported. (boolean, default is false)
 ## Example
 
 ### query で指定したものをすべて抽出
