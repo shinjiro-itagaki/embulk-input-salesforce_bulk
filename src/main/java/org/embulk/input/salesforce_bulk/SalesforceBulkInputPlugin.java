@@ -120,9 +120,13 @@ public class SalesforceBulkInputPlugin
         @ConfigDefault("false")
         public Boolean getShowAllObjectTypesByGuess();
 
-        @Config("useSoapApiIfNotSupported")
+        @Config("useSoapApiIfBulkApiNotSupported")
         @ConfigDefault("false")
-        public Boolean getUseSoapApiIfNotSupported();
+        public Boolean getUseSoapApiIfBulkApiNotSupported();
+
+        @Config("useSoapApi")
+        @ConfigDefault("false")
+        public Boolean getUseSoapApi();
     }
 
     private Logger log = Exec.getLogger(SalesforceBulkInputPlugin.class);
@@ -270,17 +274,25 @@ public class SalesforceBulkInputPlugin
             log.info("Send request : '{}'", query);
 
             List<Map<String, String>> queryResults = null;
+            boolean useSoapApi=task.getUseSoapApi();
             try{
-                queryResults = sfbw.syncQuery(task.getObjectType(), query);
+                if(!useSoapApi){
+                    queryResults = sfbw.syncQuery(task.getObjectType(), query);
+                }
             }catch(AsyncApiException e){
-                if(task.getUseSoapApiIfNotSupported()){
-                    // use soap api
-                    List<String> columnNames = guessSelectSymbols(task.getColumns().getColumns().stream().map(cc->cc.getConfigSource()).collect(Collectors.toList()));
-                    queryResults = sfbw.queryBySoap(task.getObjectType(), query, columnNames);
+                if(task.getUseSoapApiIfBulkApiNotSupported()){
+                    useSoapApi = true;
                 } else {
                     throw e;
                 }
             }
+
+            if(useSoapApi){
+                // use soap api
+                List<String> columnNames = guessSelectSymbols(task.getColumns().getColumns().stream().map(cc->cc.getConfigSource()).collect(Collectors.toList()));
+                queryResults = sfbw.queryBySoap(task.getObjectType(), query, columnNames);                
+            }
+
             
             for (Map<String, String> row : queryResults) {
                 // Visitor 作成
