@@ -152,11 +152,10 @@ public class SalesforceBulkWrapper implements AutoCloseable {
         if (results.getSize() > 0) {
             while (!done) {
                 for (SObject so: results.getRecords()) {
-                    // Map<String, Object> fieldsToValue = so.getPopulatedFieldsAsMap();
                     Map<String, String> rec = new HashMap<String,String>();
                     for (String name: select_xs){
                         Object v = so.getField(name);
-                        rec.put(name, v == null ? "" : (String) v);
+                        rec.put(name, v == null ? null : (String) v);
                     }
                     rtn.add(rec);
                 }
