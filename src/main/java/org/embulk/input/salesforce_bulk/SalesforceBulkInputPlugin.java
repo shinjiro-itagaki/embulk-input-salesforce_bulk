@@ -269,14 +269,16 @@ public class SalesforceBulkInputPlugin
 
             log.info("Send request : '{}'", query);
 
+            List<Map<String, String>> queryResults = null;
             try{
-                List<Map<String, String>> queryResults = sfbw.syncQuery(task.getObjectType(), query);
+                queryResults = sfbw.syncQuery(task.getObjectType(), query);
             }catch(AsyncApiException e){
-                if(this.getUseSoapApiIfNotSupported()){
+                if(task.getUseSoapApiIfNotSupported()){
                     // use soap api
-                    queryResults = sfwb.queryBySoap(task.getObjectType(), query);
+                    List<String> columnNames = guessSelectSymbols(task.getColumns().getColumns().stream().map(cc->cc.getConfigSource()).collect(Collectors.toList()));
+                    queryResults = sfbw.queryBySoap(task.getObjectType(), query, columnNames);
                 } else {
-                    throw e
+                    throw e;
                 }
             }
             
@@ -315,9 +317,8 @@ public class SalesforceBulkInputPlugin
         String from = task.getObjectType();
         return guessQuerySelectFromByConfigSourceList(from,task.getColumns().getColumns().stream().map(cc->cc.getConfigSource()).collect(Collectors.toList()));
     }
-    
-    public static String guessQuerySelectFromByConfigSourceList(String from, List<ConfigSource> cslist)
-    {
+
+    public static List<String> guessSelectSymbols(List<ConfigSource> cslist){
         List<String> select_xs = new ArrayList<String>();
         ConfigSource[] csarr = cslist.toArray(new ConfigSource[0]);
         for(ConfigSource src : csarr){
@@ -329,6 +330,12 @@ public class SalesforceBulkInputPlugin
                 select_xs.add(select);
             }
         }
+        return select_xs;
+    }
+    
+    public static String guessQuerySelectFromByConfigSourceList(String from, List<ConfigSource> cslist)
+    {
+        List<String> select_xs = guessSelectSymbols(cslist);
                 
         return
             "SELECT "
@@ -461,6 +468,7 @@ public class SalesforceBulkInputPlugin
                 Map<String,String> info = new HashMap<String,String>();
                 info.put("name" ,sobj.getName());
                 info.put("label",sobj.getLabel());
+                info.put("queryable",sobj.isQueryable() ? "true" : "false");
                 objects.add(info);
             }
             rtn = rtn.set("objectTypes",objects);

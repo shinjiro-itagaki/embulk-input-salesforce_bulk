@@ -26,6 +26,8 @@ import com.sforce.soap.partner.DescribeSObjectResult;
 import com.sforce.soap.partner.DescribeGlobalResult;
 import com.sforce.soap.partner.DescribeGlobalSObjectResult;
 import com.sforce.soap.partner.Field;
+import com.sforce.soap.partner.QueryResult;
+import com.sforce.soap.partner.sobject.SObject;
 
 import com.sforce.ws.ConnectionException;
 import com.sforce.ws.ConnectorConfig;
@@ -142,18 +144,27 @@ public class SalesforceBulkWrapper implements AutoCloseable {
         }
     }
 
-    public List<Map<String, String>> queryBySoap(String objectType, String query)
-            throws InterruptedException, AsyncApiException, IOException {
-        QueryResult results = connection.query(query);
+    public List<Map<String, String>> queryBySoap(String objectType, String query, List<String> select_xs)
+        throws InterruptedException, AsyncApiException, IOException, ConnectionException {
+        QueryResult results = this.partnerConnection.query(query);
         List<Map<String,String>> rtn = new ArrayList<>();
+        boolean done = false;
         if (results.getSize() > 0) {
-            for (SObject so: results.getRecords()) {
-                Map<String, Object> fieldsToValue = so.getPopulatedFieldsAsMap();
-                Map<String, String> rec = new HashMap<String,String>();
-                for (String fieldName : fieldsToValue.keySet()){
-                    rec.set(fieldName,fieldsToValue.get(fieldName));
+            while (!done) {
+                for (SObject so: results.getRecords()) {
+                    // Map<String, Object> fieldsToValue = so.getPopulatedFieldsAsMap();
+                    Map<String, String> rec = new HashMap<String,String>();
+                    for (String name: select_xs){
+                        Object v = so.getField(name);
+                        rec.put(name, v == null ? "" : (String) v);
+                    }
+                    rtn.add(rec);
                 }
-                rtn.add(rec)
+                if (results.isDone()) {
+                    done = true;
+                } else {
+                    results = this.partnerConnection.queryMore(results.getQueryLocator());
+                }
             }
         }
         return rtn;
