@@ -129,6 +129,47 @@ public class SalesforceBulkInputPlugin
         public Boolean getUseSoapApi();
     }
 
+    class EachImpl implements SalesforceBulkWrapper.Each<String,String> {
+        public String start_row_marker = null;
+        private final Schema schema;
+        private final PageBuilder pageBuilder;
+        private final PluginTask task;
+        private final String column;
+
+        public EachImpl(Schema schema, PageBuilder pageBuilder, PluginTask task, String column){
+            this.schema = schema;
+            this.pageBuilder = pageBuilder;
+            this.task = task;
+            this.column = column;
+        }
+
+        public void clear(){
+            this.start_row_marker = null;
+        }
+        
+        public Map<String,String> each(Map<String,String> row){
+            // Visitor 作成
+            ColumnVisitor visitor = new ColumnVisitorImpl(row, this.task, this.pageBuilder);
+            // スキーマ解析
+            schema.visitColumns(visitor);
+            // 編集したレコードを追加
+            this.pageBuilder.addRecord();
+
+            // 取得した値の最大値を start_row_marker に設定
+            if (this.column != null) {
+                String columnValue = row.get(this.column);
+                if(this.start_row_marker == null){
+                    this.start_row_marker = columnValue;
+                }else{
+                    if(columnValue != null){
+                        this.start_row_marker = Arrays.asList(this.start_row_marker, columnValue).stream().max(Comparator.naturalOrder()).orElse(null);
+                    }
+                }
+            }
+            return row;
+        }
+    }
+    
     private Logger log = Exec.getLogger(SalesforceBulkInputPlugin.class);
 
     public static String castTypeName(String typename){
@@ -221,7 +262,6 @@ public class SalesforceBulkInputPlugin
         PageBuilder pageBuilder = new PageBuilder(allocator, schema, output);
 
         // start_row_marker 取得のための前準備
-        String start_row_marker = null;
         TaskReport taskReport = Exec.newTaskReport();
 
         log.info("Try login to '{}'.", task.getAuthEndpointUrl());
@@ -272,12 +312,16 @@ public class SalesforceBulkInputPlugin
             }
 
             log.info("Send request : '{}'", query);
-
-            List<Map<String, String>> queryResults = null;
+            
+            EachImpl func = new EachImpl(schema, pageBuilder, task, column);
+            
+            // java 8
+            // func = (Map<String,String> record) -> { return record; };
+            int queryResultCount = -1;
             boolean useSoapApi=task.getUseSoapApi();
             try{
                 if(!useSoapApi){
-                    queryResults = sfbw.syncQuery(task.getObjectType(), query);
+                    queryResultCount = sfbw.syncQuery(task.getObjectType(), query, func);
                 }
             }catch(AsyncApiException e){
                 if(task.getUseSoapApiIfBulkApiNotSupported()){
@@ -288,40 +332,19 @@ public class SalesforceBulkInputPlugin
             }
 
             if(useSoapApi){
+                func.clear();
                 // use soap api
                 List<String> columnNames = guessSelectSymbols(task.getColumns().getColumns().stream().map(cc->cc.getConfigSource()).collect(Collectors.toList()));
-                queryResults = sfbw.queryBySoap(task.getObjectType(), query, columnNames);                
+                queryResultCount = sfbw.queryBySoap(task.getObjectType(), query, columnNames, func);
             }
 
+            taskReport.set("start_row_marker", (func.start_row_marker == null) ? value : func.start_row_marker);
             
-            for (Map<String, String> row : queryResults) {
-                // Visitor 作成
-                ColumnVisitor visitor = new ColumnVisitorImpl(row, task, pageBuilder);
-
-                // スキーマ解析
-                schema.visitColumns(visitor);
-
-                // 編集したレコードを追加
-                pageBuilder.addRecord();
-            }
             pageBuilder.finish();
-
-            // 取得した値の最大値を start_row_marker に設定
-            if (column != null) {
-                start_row_marker = queryResults.stream()
-                    .map(item -> item.get(column))
-                    .max(Comparator.naturalOrder()).orElse(null);
-
-                if (start_row_marker == null) {
-                    taskReport.set("start_row_marker", value);
-                } else {
-                    taskReport.set("start_row_marker", start_row_marker);
-                }
-            }
         } catch (ConnectionException|AsyncApiException|InterruptedException|IOException e) {
             log.error("{}", e.getClass(), e);
         }
-
+    
         return taskReport;
     }
 
