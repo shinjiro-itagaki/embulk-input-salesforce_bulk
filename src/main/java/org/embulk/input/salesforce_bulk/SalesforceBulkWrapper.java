@@ -26,6 +26,8 @@ import com.sforce.soap.partner.DescribeSObjectResult;
 import com.sforce.soap.partner.DescribeGlobalResult;
 import com.sforce.soap.partner.DescribeGlobalSObjectResult;
 import com.sforce.soap.partner.Field;
+import com.sforce.soap.partner.QueryResult;
+import com.sforce.soap.partner.sobject.SObject;
 
 import com.sforce.ws.ConnectionException;
 import com.sforce.ws.ConnectorConfig;
@@ -42,8 +44,8 @@ import com.sforce.ws.ConnectorConfig;
  *         AUTH_ENDPOINT_URL,
  *         IS_COMPRESSION,
  *         POLLING_INTERVAL_MILLISECOND);
- * List<Map<String, String>> results = sfbw.syncQuery(
- *         "Account", "SELECT Id, Name FROM Account ORDER BY Id");
+ * int results = sfbw.syncQuery(
+ *         "Account", "SELECT Id, Name FROM Account ORDER BY Id", new SalesforceBulkWrapper.Each<String,String>() { public Map<String,String> each(Map<String,String> row){ ... }});
  * sfbw.close();
  * }
  * </pre>
@@ -67,6 +69,10 @@ public class SalesforceBulkWrapper implements AutoCloseable {
     private static final int POLLING_INTERVAL_MILLISECOND_DEFAULT = 30000;
     private static final boolean QUERY_ALL_DEFAULT = false;
 
+    public interface Each<K,V>{
+        public Map<K,V> each(Map<K,V> record);
+    }
+    
     /**
      * Constructor
      */
@@ -102,8 +108,8 @@ public class SalesforceBulkWrapper implements AutoCloseable {
         this.queryAll = queryAll;
     }
 
-    public List<Map<String, String>> syncQuery(String objectType, String query)
-            throws InterruptedException, AsyncApiException, IOException {
+    public int syncQuery(String objectType, String query, Each<String,String> hook)
+        throws InterruptedException, AsyncApiException, IOException {
 
         // ジョブ作成
         JobInfo jobInfo = new JobInfo();
@@ -136,17 +142,46 @@ public class SalesforceBulkWrapper implements AutoCloseable {
                     bulkConnection.getQueryResultList(
                             batchInfo.getJobId(),
                             batchInfo.getId());
-            return getQueryResultMapList(batchInfo, queryResultList);
+            return getQueryResultCount(batchInfo, queryResultList, hook);
         } else {
             throw new AsyncApiException(batchInfo.getStateMessage(), AsyncExceptionCode.InvalidBatch);
         }
     }
 
-    private List<Map<String, String>> getQueryResultMapList(BatchInfo batchInfo,
-            QueryResultList queryResultList)
-            throws AsyncApiException, IOException {
+    public int queryBySoap(String objectType, String query, List<String> select_xs, Each<String,String> func)
+        throws InterruptedException, AsyncApiException, IOException, ConnectionException {
+        QueryResult results = this.partnerConnection.query(query);
+        boolean done = false;
+        int rtn = -1;
+        if (results.getSize() > 0) {
+            rtn = 0;
+            while (!done) {
+                for (SObject so: results.getRecords()) {
+                    Map<String, String> rec = new HashMap<String,String>();
+                    for (String name: select_xs){
+                        Object v = so.getField(name);
+                        rec.put(name, v == null ? null : (String) v);
+                    }
+                    func.each(rec);
+                    rtn += 1;
+                }
+                if (results.isDone()) {
+                    done = true;
+                } else {
+                    results = this.partnerConnection.queryMore(results.getQueryLocator());
+                }
+            }
+        }
+        return rtn;
+    }
+    
+    private int getQueryResultCount(BatchInfo batchInfo,
+                                    QueryResultList queryResultList,
+                                    Each<String,String> hook)
+        throws AsyncApiException, IOException
+    {
 
-        List<Map<String, String>> queryResults = new ArrayList<>();
+        int count = 0;
 
         for (String queryResultId : queryResultList.getResult()) {
             CSVReader rdr =
@@ -168,10 +203,11 @@ public class SalesforceBulkWrapper implements AutoCloseable {
                 for (int i = 0; i < resultCols; i++) {
                     rowMap.put(resultHeader.get(i), row.get(i));
                 }
-                queryResults.add(rowMap);
+                hook.each(rowMap);
+                count += 1;
             }
         }
-        return queryResults;
+        return count;
     }
 
     public void close() throws ConnectionException {

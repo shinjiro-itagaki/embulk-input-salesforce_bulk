@@ -13,7 +13,7 @@ configurations {
     provided
 }
 
-version = "0.2.6"
+version = "0.2.7"
 [compileJava, compileTestJava]*.options*.encoding = "UTF-8"
 
 dependencies {
